@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # LLM - we'll use Groq as primary (free tier)
     GROQ_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+    QDRANT_API_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"
