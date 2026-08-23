@@ -1,5 +1,21 @@
-__pycache__/ 
-.env 
-venv/ 
-node_modules/ 
-*.db 
+# Python
+__pycache__/
+*.py[cod]
+venv/
+*.db
+*.sqlite3
+
+# Environment
+.env
+
+# Node
+node_modules/
+dist/
+build/
+
+# Uploads & local data
+uploads/
+qdrant_data/
+
+# Logs
+*.log
