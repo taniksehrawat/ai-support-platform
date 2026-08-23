@@ -5,10 +5,8 @@ from sqlalchemy.orm import Session
 from backend.app.services.llm_service import generate_response
 from backend.app.services.ticket_service import create_support_ticket
 from backend.app.database.qdrant import client as qdrant, COLLECTION_NAME
-from sentence_transformers import SentenceTransformer
+from backend.app.rag.embeddings import get_query_embedding
 import json
-
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 class AgentState(TypedDict):
     user_message: str
@@ -16,7 +14,6 @@ class AgentState(TypedDict):
     intent: Optional[str]
     retrieved_context: Optional[str]
     ai_response: Optional[str]
-    # The following will be injected by the chat endpoint
     db: Session
     user_id: int
 
@@ -37,7 +34,7 @@ Return ONLY the category string, nothing else."""
 def retriever_agent(state: AgentState) -> AgentState:
     if state.get("intent") != "knowledge_base":
         return {"retrieved_context": None}
-    query_embedding = embedder.encode(state["user_message"]).tolist()
+    query_embedding = get_query_embedding(state["user_message"])
     search_result = qdrant.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
@@ -71,8 +68,6 @@ AI:"""
         return {"ai_response": generate_response(prompt)}
 
     elif intent == "create_ticket":
-        # --- AI Tool Calling ---
-        # 1. Ask the LLM to extract a title and description for the ticket.
         extraction_prompt = f"""Extract a short title (max 5 words) and a brief description from the user's request. Return ONLY a JSON object with keys "title" and "description". Do NOT include any other text.
 
 User request: {user_msg}
@@ -80,7 +75,6 @@ User request: {user_msg}
 JSON:"""
         raw = generate_response(extraction_prompt)
         try:
-            # Clean up markdown if any
             json_str = raw.strip().strip("```json").strip("```").strip()
             details = json.loads(json_str)
             title = details.get("title", "Support Request")
@@ -89,10 +83,7 @@ JSON:"""
             title = "Support Request"
             description = user_msg
 
-        # 2. Actually call the tool (create ticket in DB)
         ticket = create_support_ticket(state["db"], state["user_id"], title, description)
-
-        # 3. Generate confirmation response
         response = f"I've created a support ticket for you.\n\n**Ticket #{ticket.id}**\nTitle: {ticket.title}\nStatus: {ticket.status.value}\n\nOur team will get back to you shortly."
         return {"ai_response": response}
 
@@ -105,7 +96,6 @@ Conversation history:
 User: {user_msg}
 AI:"""
         return {"ai_response": generate_response(prompt)}
-
 
 def build_agent_graph():
     workflow = StateGraph(AgentState)
