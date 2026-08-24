@@ -1,15 +1,12 @@
 # backend/app/services/llm_service.py
-from groq import Groq
+import google.generativeai as genai
 from backend.app.config import settings
 
-client = Groq(api_key=settings.GROQ_API_KEY)
+# Configure Gemini
+genai.configure(api_key=settings.GEMINI_API_KEY)
 
-def generate_response(prompt: str, model: str = "gemma2-9b-it") -> str:
-    """Call Groq chat completion API with a current free model."""
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=1024,
-    )
-    return completion.choices[0].message.content.strip()
+def generate_response(prompt: str, model: str = "gemini-1.5-flash") -> str:
+    """Call Google Gemini chat completion API."""
+    gemini_model = genai.GenerativeModel(model)
+    response = gemini_model.generate_content(prompt)
+    return response.text.strip()
