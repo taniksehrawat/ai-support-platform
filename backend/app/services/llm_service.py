@@ -4,7 +4,7 @@ from backend.app.config import settings
 
 client = Groq(api_key=settings.GROQ_API_KEY)
 
-def generate_response(prompt: str, model: str = "llama-3.1-8b-instant") -> str:
+def generate_response(prompt: str, model: str = "gemma2-9b-it") -> str:
     """Call Groq chat completion API with a current free model."""
     completion = client.chat.completions.create(
         model=model,
