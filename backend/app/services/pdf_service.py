@@ -1,10 +1,10 @@
 # backend/app/services/pdf_service.py
-import os
+import uuid
 from PyPDF2 import PdfReader
+from qdrant_client.models import PointStruct
 from backend.app.rag.embeddings import get_document_embedding
 from backend.app.database.qdrant import client, COLLECTION_NAME
-from qdrant_client.models import PointStruct
-import uuid
+
 
 def extract_text_from_pdf(file_path: str) -> str:
     reader = PdfReader(file_path)
@@ -15,6 +15,7 @@ def extract_text_from_pdf(file_path: str) -> str:
             text += page_text + "\n"
     return text.strip()
 
+
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     chunks = []
     start = 0
@@ -24,7 +25,9 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]
         start = end - overlap
     return chunks
 
-def process_pdf(file_path: str, file_id: int) -> list[str]:
+
+def process_pdf(file_path: str, file_id: int, user_id: int, filename: str) -> list[str]:
+    """Extract text, chunk, embed, and store in Qdrant with user_id + filename metadata."""
     text = extract_text_from_pdf(file_path)
     if not text:
         return []
@@ -33,13 +36,14 @@ def process_pdf(file_path: str, file_id: int) -> list[str]:
     points = []
     for i, chunk in enumerate(chunks):
         emb = get_document_embedding(chunk)
-        point_id = str(uuid.uuid4())
         points.append(
             PointStruct(
-                id=point_id,
+                id=str(uuid.uuid4()),
                 vector=emb,
                 payload={
                     "file_id": file_id,
+                    "user_id": user_id,
+                    "filename": filename,
                     "chunk_index": i,
                     "text": chunk,
                 },

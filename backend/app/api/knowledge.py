@@ -40,7 +40,7 @@ async def upload_pdf(
 
     # Process PDF (extract, embed, store in Qdrant)
     try:
-        process_pdf(file_location, kb_entry.id)
+        process_pdf(file_location, kb_entry.id, current_user.id, file.filename)
     except Exception as e:
         # Rollback DB entry on failure
         db.delete(kb_entry)

@@ -7,7 +7,7 @@ from backend.app.services.ticket_service import create_support_ticket
 from backend.app.database.qdrant import client as qdrant, COLLECTION_NAME
 from backend.app.rag.embeddings import get_query_embedding
 import json
-
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 class AgentState(TypedDict):
     user_message: str
     chat_history: List[str]
@@ -34,18 +34,31 @@ Return ONLY the category string, nothing else."""
 def retriever_agent(state: AgentState) -> AgentState:
     if state.get("intent") != "knowledge_base":
         return {"retrieved_context": None}
+
     query_embedding = get_query_embedding(state["user_message"])
+
     search_result = qdrant.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
-        limit=3,
+        limit=5,   # increased from 3
+        query_filter=Filter(
+            must=[
+                FieldCondition(
+                    key="user_id",
+                    match=MatchValue(value=state["user_id"]),
+                )
+            ]
+        ),
     )
+
     if not search_result:
         return {"retrieved_context": "No relevant documents found."}
+
     parts = []
     for hit in search_result:
+        filename = hit.payload.get("filename", "unknown")
         text = hit.payload.get("text", "")
-        parts.append(f"[Source: {hit.payload.get('file_id', 'unknown')}] {text}")
+        parts.append(f"[Source: {filename}]\n{text}")
     return {"retrieved_context": "\n\n".join(parts)}
 
 def response_agent(state: AgentState) -> AgentState:
