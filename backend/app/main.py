@@ -6,16 +6,10 @@ from backend.app.config import settings
 from backend.app.database.database import engine, Base
 from backend.app.database.qdrant import init_qdrant
 
-# Import models
-from backend.app.models import user, knowledge_base
+from backend.app.models import user, knowledge_base, chat_log     # noqa
+from backend.app.api import auth, knowledge, chat, admin, analytics
 
-# Import routers
-from backend.app.api import auth, knowledge, chat, tickets
-
-app = FastAPI(
-    title=settings.APP_NAME,
-    debug=settings.DEBUG,
-)
+app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,21 +22,21 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(knowledge.router)
 app.include_router(chat.router)
-app.include_router(tickets.router) 
+app.include_router(admin.router)
+app.include_router(analytics.router)
+
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "AI Support Platform is running"}
+    return {"status": "ok", "message": "CU Hostel Help Assistant is running"}
+
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to AI Support Platform API"}
+    return {"message": "Welcome to CU Hostel Help Assistant API"}
+
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
     init_qdrant()
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("backend.app.main:app", host="0.0.0.0", port=8000, reload=True)

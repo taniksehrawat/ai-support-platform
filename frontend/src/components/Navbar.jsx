@@ -3,8 +3,9 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user?.role === "admin";
 
   const handleLogout = () => {
     logout();
@@ -12,18 +13,19 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="bg-blue-700 text-white p-4 flex justify-between items-center shadow">
-      <h1 className="text-xl font-bold">AI Support Platform</h1>
-      <div className="flex items-center gap-4">
-        <Link to="/chat" className="hover:underline text-sm">
-          Chat
-        </Link>
-        <Link to="/tickets" className="hover:underline text-sm">
-          Tickets
-        </Link>
+    <nav className="bg-indigo-700 text-white p-4 flex justify-between items-center shadow">
+      <h1 className="text-lg font-bold">🎓 CU Hostel Help Assistant</h1>
+      <div className="flex items-center gap-4 text-sm">
+        <Link to="/chat" className="hover:underline">Ask</Link>
+        {isAdmin && (
+          <>
+            <Link to="/admin" className="hover:underline">Manage Rules</Link>
+            <Link to="/admin/analytics" className="hover:underline">Analytics</Link>
+          </>
+        )}
         <button
           onClick={handleLogout}
-          className="bg-red-500 hover:bg-red-600 px-4 py-1 rounded text-sm"
+          className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded"
         >
           Logout
         </button>

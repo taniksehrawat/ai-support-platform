@@ -2,62 +2,62 @@
 import { useState, useRef, useEffect } from "react";
 import API from "../api";
 import Navbar from "../components/Navbar";
+import { useAuth } from "../context/AuthContext";
+
+const SAMPLE_QUESTIONS = [
+  "What are the mess timings?",
+  "Can I keep an electric kettle in my room?",
+  "What is the process to apply for leave?",
+  "How do I contact the hostel warden?",
+];
 
 export default function ChatPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
-  const messagesEndRef = useRef(null);
+  const endRef = useRef(null);
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-
-    const userMsg = input.trim();
+  const send = async (text) => {
+    const msg = (text ?? input).trim();
+    if (!msg) return;
     setInput("");
-
-    // Add user message to chat
-    const updatedMessages = [...messages, { sender: "user", text: userMsg }];
-    setMessages(updatedMessages);
+    const updated = [...messages, { sender: "user", text: msg }];
+    setMessages(updated);
     setLoading(true);
-
     try {
-      const res = await API.post("/chat/", { message: userMsg });
-      const aiText = res.data.response;
-      setMessages([...updatedMessages, { sender: "ai", text: aiText }]);
+      const res = await API.post("/chat/", { message: msg });
+      setMessages([...updated, { sender: "ai", text: res.data.response }]);
     } catch (err) {
-      setMessages([
-        ...updatedMessages,
-        { sender: "ai", text: "Error: " + (err.response?.data?.detail || "Something went wrong.") },
-      ]);
+      setMessages([...updated, {
+        sender: "ai",
+        text: "Error: " + (err.response?.data?.detail || "Something went wrong."),
+      }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFileUpload = async (e) => {
+  const upload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
+    const form = new FormData();
+    form.append("file", file);
     setUploadStatus(`Uploading ${file.name}...`);
     try {
-      await API.post("/knowledge/upload", formData, {
+      await API.post("/knowledge/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setUploadStatus(`✅ ${file.name} uploaded successfully.`);
-      // Clear the input so user can upload same file again
+      setUploadStatus(`✅ ${file.name} uploaded.`);
       e.target.value = null;
     } catch (err) {
-      setUploadStatus(`❌ Upload failed: ${err.response?.data?.detail || err.message}`);
+      setUploadStatus(`❌ ${err.response?.data?.detail || err.message}`);
     }
   };
 
@@ -65,64 +65,76 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen">
       <Navbar />
 
-      {/* Chat messages area */}
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-4 bg-slate-50">
         {messages.length === 0 && (
-          <p className="text-gray-400 text-center mt-20">
-            Start a conversation or upload a PDF to the knowledge base.
-          </p>
+          <div className="max-w-2xl mx-auto text-center mt-16">
+            <h2 className="text-xl font-semibold text-slate-700 mb-2">
+              Ask anything about CU hostel life
+            </h2>
+            <p className="text-slate-500 mb-6">
+              Answers come from official hostel rules uploaded by the admin.
+            </p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {SAMPLE_QUESTIONS.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => send(q)}
+                  className="bg-white border border-slate-300 px-3 py-2 rounded-full text-sm hover:bg-indigo-50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`flex mb-4 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[75%] px-4 py-2 rounded-lg whitespace-pre-wrap ${
-                msg.sender === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white border border-gray-200 text-gray-900"
-              }`}
-            >
-              {msg.text}
+
+        {messages.map((m, i) => (
+          <div key={i} className={`flex mb-4 ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[75%] px-4 py-2 rounded-lg whitespace-pre-wrap ${
+              m.sender === "user"
+                ? "bg-indigo-600 text-white"
+                : "bg-white border border-slate-200 text-slate-900"
+            }`}>
+              {m.text}
             </div>
           </div>
         ))}
+
         {loading && (
           <div className="flex justify-start mb-4">
-            <div className="bg-white border border-gray-200 text-gray-400 px-4 py-2 rounded-lg">
-              AI is thinking...
+            <div className="bg-white border px-4 py-2 rounded-lg text-slate-400">
+              Assistant is typing...
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
 
-      {/* PDF upload status indicator */}
       {uploadStatus && (
-        <div className="px-4 py-2 bg-gray-100 text-sm text-gray-700 border-t">
-          {uploadStatus}
-        </div>
+        <div className="px-4 py-2 text-sm bg-slate-100 border-t">{uploadStatus}</div>
       )}
 
-      {/* Input area */}
-      <form onSubmit={handleSend} className="bg-white border-t p-4 flex items-center gap-3">
+      <form
+        onSubmit={(e) => { e.preventDefault(); send(); }}
+        className="bg-white border-t p-4 flex items-center gap-3"
+      >
         <input
-          type="text"
-          placeholder="Type your message..."
-          className="flex-1 border rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask about hostel rules, timings, leave..."
+          className="flex-1 border rounded px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
           disabled={loading}
         />
-        <label className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded cursor-pointer text-sm font-medium">
-          📎 PDF
-          <input type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
-        </label>
+        {isAdmin && (
+          <label className="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded cursor-pointer text-sm">
+            📎 PDF
+            <input type="file" accept=".pdf" onChange={upload} className="hidden" />
+          </label>
+        )}
         <button
           type="submit"
           disabled={loading || !input.trim()}
-          className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
         >
           Send
         </button>

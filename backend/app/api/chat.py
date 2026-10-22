@@ -5,17 +5,21 @@ from sqlalchemy.orm import Session
 from backend.app.agents.graph import build_agent_graph
 from backend.app.utils.auth import get_current_user
 from backend.app.models.user import User
+from backend.app.models.chat_log import ChatLog
 from backend.app.database.database import get_db
 from backend.app.services.memory_service import add_message, get_history
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 agent_graph = build_agent_graph()
 
+
 class ChatRequest(BaseModel):
     message: str
 
+
 class ChatResponse(BaseModel):
     response: str
+
 
 @router.post("/", response_model=ChatResponse)
 def chat(
@@ -26,7 +30,6 @@ def chat(
     user_msg = request.message
     history = get_history(current_user.id)
 
-    # Prepare state with db and user_id so the tool can use them
     state = {
         "user_message": user_msg,
         "chat_history": history,
@@ -34,8 +37,21 @@ def chat(
         "user_id": current_user.id,
     }
     result = agent_graph.invoke(state)
+    ai_response = result.get("ai_response", "Sorry, something went wrong.")
 
-    ai_response = result.get("ai_response", "Sorry, I encountered an error.")
-    add_message(current_user.id, "User", user_msg)
-    add_message(current_user.id, "AI", ai_response)
+    sources = result.get("sources") or []
+    files = ", ".join(sorted({s["filename"] for s in sources})) or None
+
+    db.add(ChatLog(
+        user_id=current_user.id,
+        question=user_msg,
+        intent=result.get("intent", "general"),
+        answered=bool(result.get("retrieved_context")),
+        source_files=files,
+    ))
+    db.commit()
+
+    add_message(current_user.id, "Student", user_msg)
+    add_message(current_user.id, "Assistant", ai_response)
+
     return {"response": ai_response}

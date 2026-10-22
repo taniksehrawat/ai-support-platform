@@ -14,7 +14,8 @@ class UserOut(BaseModel):
     id: int
     email: str
     username: str
-    created_at: str  # ISO format string
+    role: str
+    created_at: str
 
     class Config:
         from_attributes = True
@@ -22,3 +23,4 @@ class UserOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    role: str          # <-- frontend needs this

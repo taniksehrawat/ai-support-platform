@@ -1,65 +1,62 @@
 # backend/app/agents/graph.py
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Dict
 from langgraph.graph import StateGraph, END
 from sqlalchemy.orm import Session
 from backend.app.services.llm_service import generate_response
-from backend.app.services.ticket_service import create_support_ticket
 from backend.app.database.qdrant import client as qdrant, COLLECTION_NAME
 from backend.app.rag.embeddings import get_query_embedding
-import json
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+
 class AgentState(TypedDict):
     user_message: str
     chat_history: List[str]
     intent: Optional[str]
     retrieved_context: Optional[str]
+    sources: Optional[List[Dict]]
     ai_response: Optional[str]
     db: Session
     user_id: int
 
+
 def intent_agent(state: AgentState) -> AgentState:
-    prompt = f"""You are an intent classifier. Categorize the user message into one of:
-- "knowledge_base": User asks a question that likely can be answered from a support PDF.
-- "create_ticket": User wants to report an issue, request help, or create a support ticket.
-- "general": General greeting, off-topic, or small talk.
+    prompt = f"""You classify student questions to a university hostel help assistant.
+Categorize the message into exactly one of:
+- "knowledge_base": question about hostel rules, timings, fees, leave policy, mess, warden, etc.
+- "general": greeting, thanks, small talk, or off-topic.
 
 User message: {state['user_message']}
 
-Return ONLY the category string, nothing else."""
+Return ONLY the category string."""
     intent = generate_response(prompt).strip().lower()
-    if intent not in ["knowledge_base", "create_ticket", "general"]:
+    if intent not in ["knowledge_base", "general"]:
         intent = "general"
     return {"intent": intent}
 
+
 def retriever_agent(state: AgentState) -> AgentState:
     if state.get("intent") != "knowledge_base":
-        return {"retrieved_context": None}
+        return {"retrieved_context": None, "sources": []}
 
     query_embedding = get_query_embedding(state["user_message"])
-
-    search_result = qdrant.search(
+    # No user_id filter: all students share the admin-uploaded hostel knowledge base
+    hits = qdrant.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
-        limit=5,   # increased from 3
-        query_filter=Filter(
-            must=[
-                FieldCondition(
-                    key="user_id",
-                    match=MatchValue(value=state["user_id"]),
-                )
-            ]
-        ),
+        limit=5,
     )
 
-    if not search_result:
-        return {"retrieved_context": "No relevant documents found."}
+    if not hits:
+        return {"retrieved_context": "", "sources": []}
 
-    parts = []
-    for hit in search_result:
-        filename = hit.payload.get("filename", "unknown")
-        text = hit.payload.get("text", "")
+    parts, sources = [], []
+    for h in hits:
+        filename = h.payload.get("filename", "unknown")
+        text = h.payload.get("text", "")
         parts.append(f"[Source: {filename}]\n{text}")
-    return {"retrieved_context": "\n\n".join(parts)}
+        sources.append({"filename": filename})
+
+    return {"retrieved_context": "\n\n".join(parts), "sources": sources}
+
 
 def response_agent(state: AgentState) -> AgentState:
     history = "\n".join(state.get("chat_history", [])[-5:])
@@ -67,48 +64,38 @@ def response_agent(state: AgentState) -> AgentState:
     intent = state.get("intent", "general")
 
     if intent == "knowledge_base":
-        ctx = state.get("retrieved_context", "No context found.")
-        prompt = f"""You are a helpful support assistant. Answer using the context below. If the context doesn't answer, say so politely.
+        ctx = state.get("retrieved_context") or ""
+        if not ctx.strip():
+            return {"ai_response": (
+                "I couldn't find that in the hostel rules and guidelines. "
+                "Please contact your hostel warden for confirmation."
+            )}
 
-Conversation history:
+        prompt = f"""You are the CU Hostel Help Assistant. Answer the student's question
+using ONLY the context below. If the context does not cover the question, respond:
+"I couldn't find that in the hostel rules — please contact your hostel warden."
+
+Always cite the source filename at the end like: (Source: Hostel_Rules_2025.pdf)
+
+Recent conversation:
 {history}
 
 Context:
 {ctx}
 
-User: {user_msg}
-AI:"""
+Student: {user_msg}
+Assistant:"""
         return {"ai_response": generate_response(prompt)}
 
-    elif intent == "create_ticket":
-        extraction_prompt = f"""Extract a short title (max 5 words) and a brief description from the user's request. Return ONLY a JSON object with keys "title" and "description". Do NOT include any other text.
+    prompt = f"""You are the CU Hostel Help Assistant. Reply briefly and helpfully.
 
-User request: {user_msg}
-
-JSON:"""
-        raw = generate_response(extraction_prompt)
-        try:
-            json_str = raw.strip().strip("```json").strip("```").strip()
-            details = json.loads(json_str)
-            title = details.get("title", "Support Request")
-            description = details.get("description", user_msg)
-        except Exception:
-            title = "Support Request"
-            description = user_msg
-
-        ticket = create_support_ticket(state["db"], state["user_id"], title, description)
-        response = f"I've created a support ticket for you.\n\n**Ticket #{ticket.id}**\nTitle: {ticket.title}\nStatus: {ticket.status.value}\n\nOur team will get back to you shortly."
-        return {"ai_response": response}
-
-    else:
-        prompt = f"""You are a helpful customer support assistant. Respond naturally.
-
-Conversation history:
+Recent conversation:
 {history}
 
-User: {user_msg}
-AI:"""
-        return {"ai_response": generate_response(prompt)}
+Student: {user_msg}
+Assistant:"""
+    return {"ai_response": generate_response(prompt)}
+
 
 def build_agent_graph():
     workflow = StateGraph(AgentState)

@@ -8,35 +8,32 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount, check if token exists and validate it
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (token) {
-      // In a real app you'd validate token with /auth/me endpoint.
-      // For simplicity, assume token is valid and just set user flag.
-      setUser({ token });
-    }
+    const role = localStorage.getItem("role");
+    if (token) setUser({ token, role });
     setLoading(false);
   }, []);
 
   const login = async (email, password) => {
     const res = await API.post("/auth/login", { email, password });
-    const { access_token } = res.data;
+    const { access_token, role } = res.data;
     localStorage.setItem("token", access_token);
-    setUser({ token: access_token });
-    return res.data;
+    localStorage.setItem("role", role);
+    setUser({ token: access_token, role });
   };
 
   const signup = async (email, username, password) => {
     const res = await API.post("/auth/signup", { email, username, password });
-    const { access_token } = res.data;
+    const { access_token, role } = res.data;
     localStorage.setItem("token", access_token);
-    setUser({ token: access_token });
-    return res.data;
+    localStorage.setItem("role", role);
+    setUser({ token: access_token, role });
   };
 
   const logout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("role");
     setUser(null);
   };
 
