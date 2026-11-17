@@ -6,6 +6,8 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
+  const isShopkeeper = user?.role === "shopkeeper";
+  const isStudent = user?.role === "student";
 
   const handleLogout = () => {
     logout();
@@ -17,16 +19,23 @@ export default function Navbar() {
       <h1 className="text-lg font-bold">🎓 CU Hostel Help Assistant</h1>
       <div className="flex items-center gap-4 text-sm">
         <Link to="/chat" className="hover:underline">Ask</Link>
+
+        {isStudent && (
+          <Link to="/orders" className="hover:underline">My Orders</Link>
+        )}
+
+        {isShopkeeper && (
+          <Link to="/shop" className="hover:underline">My Shop</Link>
+        )}
+
         {isAdmin && (
           <>
             <Link to="/admin" className="hover:underline">Manage Rules</Link>
             <Link to="/admin/analytics" className="hover:underline">Analytics</Link>
           </>
         )}
-        <button
-          onClick={handleLogout}
-          className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded"
-        >
+
+        <button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded">
           Logout
         </button>
       </div>

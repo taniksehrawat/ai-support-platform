@@ -6,8 +6,8 @@ import { useAuth } from "../context/AuthContext";
 
 const SAMPLE_QUESTIONS = [
   "What are the mess timings?",
-  "Can I keep an electric kettle in my room?",
-  "What is the process to apply for leave?",
+  "What sandwiches are available?",
+  "Order 2 Veg Sandwich from Sharma Cafe",
   "How do I contact the hostel warden?",
 ];
 
@@ -33,7 +33,12 @@ export default function ChatPage() {
     setLoading(true);
     try {
       const res = await API.post("/chat/", { message: msg });
-      setMessages([...updated, { sender: "ai", text: res.data.response }]);
+      setMessages([...updated, {
+        sender: "ai",
+        text: res.data.response,
+        menuResults: res.data.menu_results || [],
+        orderId: res.data.order_id,
+      }]);
     } catch (err) {
       setMessages([...updated, {
         sender: "ai",
@@ -69,18 +74,15 @@ export default function ChatPage() {
         {messages.length === 0 && (
           <div className="max-w-2xl mx-auto text-center mt-16">
             <h2 className="text-xl font-semibold text-slate-700 mb-2">
-              Ask anything about CU hostel life
+              Ask about hostel life or order food
             </h2>
             <p className="text-slate-500 mb-6">
-              Answers come from official hostel rules uploaded by the admin.
+              Answers come from official rules PDFs. You can also order from campus shops.
             </p>
             <div className="flex flex-wrap gap-2 justify-center">
               {SAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => send(q)}
-                  className="bg-white border border-slate-300 px-3 py-2 rounded-full text-sm hover:bg-indigo-50"
-                >
+                <button key={q} onClick={() => send(q)}
+                  className="bg-white border border-slate-300 px-3 py-2 rounded-full text-sm hover:bg-indigo-50">
                   {q}
                 </button>
               ))}
@@ -96,6 +98,24 @@ export default function ChatPage() {
                 : "bg-white border border-slate-200 text-slate-900"
             }`}>
               {m.text}
+
+              {m.menuResults?.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {m.menuResults.map((r, j) => (
+                    <button key={j}
+                      onClick={() => send(`order 1 ${r.item_name} from ${r.shop_name}`)}
+                      className="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-3 py-1 rounded-full">
+                      Order {r.item_name} — ₹{Number(r.price).toFixed(2)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {m.orderId && (
+                <a href="/orders" className="block mt-2 text-xs text-indigo-600 hover:underline">
+                  View my orders →
+                </a>
+              )}
             </div>
           </div>
         ))}
@@ -114,28 +134,20 @@ export default function ChatPage() {
         <div className="px-4 py-2 text-sm bg-slate-100 border-t">{uploadStatus}</div>
       )}
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); send(); }}
-        className="bg-white border-t p-4 flex items-center gap-3"
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about hostel rules, timings, leave..."
+      <form onSubmit={(e) => { e.preventDefault(); send(); }}
+        className="bg-white border-t p-4 flex items-center gap-3">
+        <input value={input} onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask rules or order food..."
           className="flex-1 border rounded px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-          disabled={loading}
-        />
+          disabled={loading} />
         {isAdmin && (
           <label className="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded cursor-pointer text-sm">
             📎 PDF
             <input type="file" accept=".pdf" onChange={upload} className="hidden" />
           </label>
         )}
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
-        >
+        <button type="submit" disabled={loading || !input.trim()}
+          className="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 disabled:opacity-50">
           Send
         </button>
       </form>

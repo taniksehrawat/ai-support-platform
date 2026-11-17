@@ -1,21 +1,56 @@
-# Python
+# ---------- Python ----------
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
 venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- Database ----------
 *.db
+*.sqlite
 *.sqlite3
+support.db
+support.db-journal
 
-# Environment
+# ---------- Vector DB (Qdrant local) ----------
+qdrant_data/
+
+# ---------- Uploaded files ----------
+uploads/
+backend/uploads/
+
+# ---------- Environment / secrets ----------
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# Node
+# ---------- Node / Frontend ----------
 node_modules/
 dist/
 build/
+.vite/
+*.local
 
-# Uploads & local data
-uploads/
-qdrant_data/
-
-# Logs
+# ---------- Logs ----------
 *.log
+logs/
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- Docker ----------
+*.pid

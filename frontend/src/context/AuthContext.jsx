@@ -21,6 +21,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem("token", access_token);
     localStorage.setItem("role", role);
     setUser({ token: access_token, role });
+    return role;   // <-- return role so Login.jsx can redirect
   };
 
   const signup = async (email, username, password) => {
@@ -29,6 +30,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem("token", access_token);
     localStorage.setItem("role", role);
     setUser({ token: access_token, role });
+    return role;
   };
 
   const logout = () => {

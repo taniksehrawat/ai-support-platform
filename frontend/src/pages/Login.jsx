@@ -14,8 +14,9 @@ export default function Login() {
     e.preventDefault();
     setError("");
     try {
-      await login(email, password);
-      navigate("/chat");
+      const role = await login(email, password);
+      if (role === "shopkeeper") navigate("/shop");
+      else navigate("/chat");
     } catch (err) {
       setError(err.response?.data?.detail || "Login failed");
     }
@@ -23,39 +24,24 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white p-8 rounded shadow-md w-full max-w-md"
-      >
+      <form onSubmit={handleSubmit} className="bg-white p-8 rounded shadow-md w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
         {error && <p className="text-red-500 mb-4">{error}</p>}
         <input
-          type="email"
-          placeholder="Email"
+          type="email" placeholder="Email"
           className="w-full p-2 border rounded mb-4"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
+          value={email} onChange={(e) => setEmail(e.target.value)} required
         />
         <input
-          type="password"
-          placeholder="Password"
+          type="password" placeholder="Password"
           className="w-full p-2 border rounded mb-6"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
+          value={password} onChange={(e) => setPassword(e.target.value)} required
         />
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700"
-        >
+        <button type="submit" className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
           Login
         </button>
         <p className="mt-4 text-center text-sm">
-          Don't have an account?{" "}
-          <Link to="/signup" className="text-blue-600 hover:underline">
-            Sign up
-          </Link>
+          Don't have an account? <Link to="/signup" className="text-blue-600 hover:underline">Sign up</Link>
         </p>
       </form>
     </div>

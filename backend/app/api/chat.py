@@ -1,7 +1,8 @@
 # backend/app/api/chat.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from backend.app.agents.graph import build_agent_graph
 from backend.app.utils.auth import get_current_user
 from backend.app.models.user import User
@@ -19,6 +20,10 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    intent: str
+    sources: list[dict] = []
+    menu_results: list[dict] = []
+    order_id: int | None = None
 
 
 @router.post("/", response_model=ChatResponse)
@@ -36,17 +41,32 @@ def chat(
         "db": db,
         "user_id": current_user.id,
     }
-    result = agent_graph.invoke(state)
-    ai_response = result.get("ai_response", "Sorry, something went wrong.")
 
+    try:
+        result = agent_graph.invoke(state)
+    except Exception:
+        raise HTTPException(503, "Assistant is temporarily unavailable, please retry.")
+
+    ai_response = result.get("ai_response", "Sorry, something went wrong.")
+    intent = result.get("intent", "general")
     sources = result.get("sources") or []
+    menu_results = result.get("menu_results") or []
+    order_id = result.get("order_id")
+
     files = ", ".join(sorted({s["filename"] for s in sources})) or None
+
+    # answered flag: true if the intent produced a real result
+    answered = (
+        (intent == "knowledge_base" and bool(result.get("retrieved_context"))) or
+        (intent == "menu_search" and bool(menu_results)) or
+        (intent == "place_order" and order_id is not None)
+    )
 
     db.add(ChatLog(
         user_id=current_user.id,
         question=user_msg,
-        intent=result.get("intent", "general"),
-        answered=bool(result.get("retrieved_context")),
+        intent=intent,
+        answered=answered,
         source_files=files,
     ))
     db.commit()
@@ -54,4 +74,10 @@ def chat(
     add_message(current_user.id, "Student", user_msg)
     add_message(current_user.id, "Assistant", ai_response)
 
-    return {"response": ai_response}
+    return {
+        "response": ai_response,
+        "intent": intent,
+        "sources": sources,
+        "menu_results": menu_results,
+        "order_id": order_id,
+    }
