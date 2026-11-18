@@ -1,6 +1,6 @@
 # backend/app/agents/graph.py
-import re
 import json
+import re
 from typing import TypedDict, List, Optional, Dict
 
 from langgraph.graph import StateGraph, END
@@ -14,8 +14,7 @@ from backend.app.models.menu_item import MenuItem
 from backend.app.models.shop import Shop
 from backend.app.models.order import Order, OrderItem
 
-
-ALLOWED_INTENTS = {"knowledge_base", "menu_search", "place_order", "general"}
+ALLOWED_INTENTS = {"knowledge_base", "menu_search", "shop_listing", "place_order", "general"}
 
 
 class AgentState(TypedDict):
@@ -26,11 +25,40 @@ class AgentState(TypedDict):
     retrieved_context: Optional[str]
     sources: Optional[List[Dict]]
     menu_results: Optional[List[Dict]]
+    shop_results: Optional[List[Dict]]
     order_id: Optional[int]
     order_summary: Optional[str]
+    order_error_context: Optional[Dict]
     ai_response: Optional[str]
     db: Session
     user_id: int
+
+
+def _clean_name(name: str) -> str:
+    """Sanitize an LLM-extracted name: strip quotes/punctuation and normalize separators."""
+    if not name:
+        return ""
+    name = name.strip().strip("'\"`.")
+    name = name.replace("_", " ").replace("-", " ")
+    name = re.sub(r"[^\w\s]", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+
+def _find_shop(db: Session, shop_name: str):
+    """Find a shop, tolerating typos and extra spaces."""
+    if not shop_name:
+        return None
+    cleaned = _clean_name(shop_name)
+    shop = db.query(Shop).filter(Shop.name.ilike(f"%{cleaned}%")).first()
+    if shop:
+        return shop
+    # Fallback: compare without spaces
+    target = cleaned.replace(" ", "").lower()
+    for s in db.query(Shop).all():
+        if s.name.replace(" ", "").lower() == target:
+            return s
+    return None
 
 
 # ---------- 1. Intent + entity extraction ----------
@@ -38,24 +66,29 @@ def intent_agent(state: AgentState) -> AgentState:
     history = "\n".join(state.get("chat_history", [])[-6:])
 
     prompt = f"""You classify student messages for a hostel assistant that answers rules
-AND takes food orders from campus shops.
+AND handles food ordering from campus shops.
 
-Return ONLY valid JSON. No explanation, no markdown fences.
+Return ONLY valid JSON. No markdown, no explanation.
 
 Possible intents:
-- "knowledge_base": questions about hostel rules, timings, fees, leave, warden, mess policy.
-- "menu_search": student mentions a dish but NO shop. (e.g. "I want a sandwich", "show me sandwiches")
-- "place_order": student names BOTH a dish AND a shop. (e.g. "order 2 sandwiches from Sharma Cafe")
-- "general": greetings, thanks, small talk, off-topic.
+- "knowledge_base": hostel rules, timings, fees, leave, warden, mess policy
+- "shop_listing": asks WHICH shops exist or are open ("which shops are open", "where can I order", "list shops")
+- "menu_search": asks about a DISH but names NO shop ("what sandwiches", "do you have coffee")
+- "place_order": names BOTH a dish AND a shop ("order 2 sandwiches from Sharma Cafe")
+- "general": greetings, thanks, small talk, off-topic
 
-IMPORTANT: If a dish is mentioned but no shop name, ALWAYS classify as menu_search, never place_order.
+Classification rules (STRICT):
+1. "which shops" / "where can I order" / "list shops" / "open shops" → shop_listing
+2. Dish mentioned but NO shop → menu_search
+3. Dish AND shop both mentioned → place_order
+4. NEVER invent shop names — only classify.
 
-Also extract entities (null if not present):
-- dish: lowercase food name (e.g. "sandwich", "coffee")
-- shop_name: exact shop name if mentioned
-- quantity: integer if explicitly stated
+Also extract (null if absent):
+- dish: lowercase food name
+- shop_name: EXACT shop name as written by the user (do not correct typos)
+- quantity: integer if stated
 
-Recent conversation (use it to resolve "it", "that", "same", omitted context):
+Recent conversation:
 {history}
 
 Student message: {state['user_message']}
@@ -93,7 +126,7 @@ def route_intent(state: AgentState) -> str:
     return state.get("intent") or "general"
 
 
-# ---------- 2a. RAG retriever (existing behavior) ----------
+# ---------- 2a. RAG retriever ----------
 def retriever_agent(state: AgentState) -> AgentState:
     if state.get("intent") != "knowledge_base":
         return {"retrieved_context": None, "sources": []}
@@ -117,7 +150,18 @@ def retriever_agent(state: AgentState) -> AgentState:
     return {"retrieved_context": "\n\n".join(parts), "sources": sources}
 
 
-# ---------- 2b. Menu search ----------
+# ---------- 2b. Shop listing (NEW) ----------
+def shop_listing_agent(state: AgentState) -> AgentState:
+    shops = state["db"].query(Shop).filter(Shop.is_open.is_(True)).order_by(Shop.name).all()
+    return {
+        "shop_results": [
+            {"id": s.id, "name": s.name, "description": s.description or ""}
+            for s in shops
+        ]
+    }
+
+
+# ---------- 2c. Menu search ----------
 def menu_search_agent(state: AgentState) -> AgentState:
     dish = (state.get("extracted") or {}).get("dish")
     if not dish:
@@ -147,16 +191,9 @@ def menu_search_agent(state: AgentState) -> AgentState:
         for item, shop in rows
     ]
     return {"menu_results": results}
-def _clean_name(name: str) -> str:
-    """Strip quotes, trailing punctuation, and extra whitespace from LLM-extracted names."""
-    if not name:
-        return ""
-    name = name.strip().strip("'\"`.")
-    name = re.sub(r"[^\w\s]", "", name)   # keep only alphanumeric + spaces
-    name = re.sub(r"\s+", " ", name).strip()
-    return name
 
-# ---------- 2c. Place order ----------
+
+# ---------- 2d. Order placement (upgraded errors) ----------
 def order_agent(state: AgentState) -> AgentState:
     db = state["db"]
     student_id = state["user_id"]
@@ -169,7 +206,7 @@ def order_agent(state: AgentState) -> AgentState:
     except (TypeError, ValueError):
         quantity = 1
 
-    # Fallback: if no shop mentioned but the previous turn listed exactly one shop, use it.
+    # Fallback: reuse prior single-shop if only one appeared earlier
     menu_results = state.get("menu_results") or []
     if not shop_name and menu_results:
         unique_shops = {r["shop_name"] for r in menu_results}
@@ -179,10 +216,22 @@ def order_agent(state: AgentState) -> AgentState:
     if not dish or not shop_name:
         return {"order_summary": "missing_info"}
 
-    shop_name = _clean_name(shop_name)
-    shop = db.query(Shop).filter(Shop.name.ilike(f"%{shop_name}%")).first()
-    if not shop or not shop.is_open:
-        return {"order_summary": "shop_unavailable"}
+    shop = _find_shop(db, shop_name)
+    if not shop:
+        # Suggest actual open shops
+        open_shops = db.query(Shop).filter(Shop.is_open.is_(True)).all()
+        return {
+            "order_summary": "shop_not_found",
+            "order_error_context": {
+                "requested_shop": shop_name,
+                "available_shops": [{"name": s.name} for s in open_shops],
+            },
+        }
+    if not shop.is_open:
+        return {
+            "order_summary": "shop_closed",
+            "order_error_context": {"shop_name": shop.name},
+        }
 
     item = (
         db.query(MenuItem)
@@ -195,9 +244,23 @@ def order_agent(state: AgentState) -> AgentState:
         .first()
     )
     if not item:
-        return {"order_summary": "item_unavailable"}
+        # Suggest items that this shop does have
+        items = (
+            db.query(MenuItem)
+            .filter(MenuItem.shop_id == shop.id, MenuItem.is_available.is_(True))
+            .all()
+        )
+        return {
+            "order_summary": "item_not_found",
+            "order_error_context": {
+                "shop_name": shop.name,
+                "requested_dish": dish,
+                "available_items": [
+                    {"name": i.name, "price": float(i.price)} for i in items
+                ],
+            },
+        }
 
-    # Price is read from DB — never trust a client-supplied price
     total = item.price * quantity
 
     order = Order(
@@ -207,8 +270,7 @@ def order_agent(state: AgentState) -> AgentState:
         total_amount=total,
     )
     db.add(order)
-    db.flush()  # get order.id before commit
-
+    db.flush()
     db.add(OrderItem(
         order_id=order.id,
         menu_item_id=item.id,
@@ -229,12 +291,24 @@ def response_agent(state: AgentState) -> AgentState:
     intent = state.get("intent")
     history = "\n".join(state.get("chat_history", [])[-5:])
 
+    # --- Shop listing ---
+    if intent == "shop_listing":
+        shops = state.get("shop_results") or []
+        if not shops:
+            return {"ai_response": "No shops are open right now."}
+        lines = [f"- {s['name']}" + (f" — {s['description']}" if s['description'] else "")
+                 for s in shops]
+        return {"ai_response": (
+            "Open shops right now:\n" + "\n".join(lines) +
+            "\n\nAsk 'what sandwiches are available?' or 'order X from <shop>' to continue."
+        )}
+
+    # --- Menu search ---
     if intent == "menu_search":
         results = state.get("menu_results") or []
         if not results:
             return {"ai_response": (
-                "Sorry, no shop currently offers that. Try asking for tea, coffee, "
-                "sandwich, or snacks."
+                "Sorry, no shop currently offers that. Try 'which shops are open?' to see options."
             )}
         lines = [f"- {r['item_name']} at {r['shop_name']} — ₹{r['price']:.2f}" for r in results]
         return {"ai_response": (
@@ -242,22 +316,43 @@ def response_agent(state: AgentState) -> AgentState:
             "\n\nSay 'order <item> from <shop>' to place an order."
         )}
 
+    # --- Place order ---
     if intent == "place_order":
         s = state.get("order_summary")
-        if s == "missing_info":
-            return {"ai_response": "I need both a dish and a shop. Try: 'order 2 sandwiches from Sharma Cafe'."}
-        if s == "shop_unavailable":
-            return {"ai_response": "That shop is closed or doesn't exist right now."}
-        if s == "item_unavailable":
-            return {"ai_response": "That item isn't available at that shop right now."}
-        return {"ai_response": f"✅ Order placed! {s}. The shop will confirm shortly."}
+        ctx = state.get("order_error_context") or {}
 
+        if s == "missing_info":
+            return {"ai_response": (
+                "I need both a dish and a shop. Try: 'order 2 sandwiches from Sharma Cafe'."
+            )}
+        if s == "shop_not_found":
+            req = ctx.get("requested_shop", "that shop")
+            shops = ctx.get("available_shops", [])
+            names = ", ".join(sh["name"] for sh in shops) if shops else "none"
+            return {"ai_response": (
+                f"I don't have a shop called '{req}'. Open shops: {names}.\n\n"
+                f"Try: 'order <item> from <shop>'."
+            )}
+        if s == "shop_closed":
+            name = ctx.get("shop_name", "That shop")
+            return {"ai_response": f"{name} is currently closed. Try 'which shops are open?'"}
+        if s == "item_not_found":
+            shop = ctx.get("shop_name", "that shop")
+            dish = ctx.get("requested_dish", "that item")
+            items = ctx.get("available_items", [])
+            menu_lines = ", ".join(f"{i['name']} (₹{i['price']:.2f})" for i in items)
+            return {"ai_response": (
+                f"{shop} doesn't have '{dish}'.\n\nTheir menu: {menu_lines}\n\n"
+                f"Try 'order <item> from {shop}'."
+            )}
+        return {"ai_response": f"✅ Order placed! {s}"}
+
+    # --- Knowledge base ---
     if intent == "knowledge_base":
         ctx = (state.get("retrieved_context") or "").strip()
         if not ctx:
             return {"ai_response": (
-                "I couldn't find that in the hostel rules. "
-                "Please contact your hostel warden."
+                "I couldn't find that in the hostel rules. Please contact your hostel warden."
             )}
         prompt = f"""You are the CU Hostel Help Assistant. Answer using ONLY the context below.
 If it doesn't cover the question, respond: "I couldn't find that in the hostel rules — please contact your hostel warden."
@@ -273,9 +368,12 @@ Student: {state['user_message']}
 Assistant:"""
         return {"ai_response": generate_response(prompt)}
 
+    # --- General (with anti-hallucination guard) ---
     prompt = f"""You are the CU Hostel Help Assistant. Reply briefly and helpfully.
-You can also help with food orders — if the student wants food, suggest:
-"what sandwiches are available?" or "order X from <shop>".
+
+IMPORTANT: You do NOT have access to the list of shops, menus, or prices.
+NEVER invent shop names or items. If the user asks about shops or food, reply:
+"Ask me 'which shops are open?' or 'what sandwiches are available?' — I can look that up."
 
 Recent conversation:
 {history}
@@ -290,6 +388,7 @@ def build_agent_graph():
     g = StateGraph(AgentState)
     g.add_node("intent_agent", intent_agent)
     g.add_node("retriever_agent", retriever_agent)
+    g.add_node("shop_listing_agent", shop_listing_agent)
     g.add_node("menu_search_agent", menu_search_agent)
     g.add_node("order_agent", order_agent)
     g.add_node("response_agent", response_agent)
@@ -297,11 +396,13 @@ def build_agent_graph():
     g.set_entry_point("intent_agent")
     g.add_conditional_edges("intent_agent", route_intent, {
         "knowledge_base": "retriever_agent",
+        "shop_listing": "shop_listing_agent",
         "menu_search": "menu_search_agent",
         "place_order": "order_agent",
         "general": "response_agent",
     })
     g.add_edge("retriever_agent", "response_agent")
+    g.add_edge("shop_listing_agent", "response_agent")
     g.add_edge("menu_search_agent", "response_agent")
     g.add_edge("order_agent", "response_agent")
     g.add_edge("response_agent", END)

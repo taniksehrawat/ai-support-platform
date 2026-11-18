@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
     intent: str
     sources: list[dict] = []
     menu_results: list[dict] = []
+    shop_results: list[dict] = []
     order_id: int | None = None
 
 
@@ -79,5 +80,6 @@ def chat(
         "intent": intent,
         "sources": sources,
         "menu_results": menu_results,
+        "shop_results": result.get("shop_results") or [],
         "order_id": order_id,
     }
