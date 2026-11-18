@@ -5,22 +5,22 @@ const API = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000",
 });
 
-// Add JWT token to every request if available
 API.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// If a response is 401, clear token and redirect to login
 API.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const url = error.config?.url || "";
+    if (error.response?.status === 401 && !url.includes("/auth/")) {
       localStorage.removeItem("token");
-      window.location.href = "/login";
+      localStorage.removeItem("role");
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

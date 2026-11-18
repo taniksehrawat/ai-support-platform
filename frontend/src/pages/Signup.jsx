@@ -3,6 +3,18 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+function parseApiError(err, fallback = "Signup failed") {
+  const detail = err.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d)))
+      .join("; ");
+  }
+  if (err.message) return err.message;
+  return fallback;
+}
+
 export default function Signup() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -18,20 +30,19 @@ export default function Signup() {
       await signup(email, username, password);
       navigate("/chat");
     } catch (err) {
-      setError(err.response?.data?.detail || "Signup failed");
+      setError(parseApiError(err, "Signup failed"));
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white p-8 rounded shadow-md w-full max-w-md"
-      >
+      <form onSubmit={handleSubmit} className="bg-white p-8 rounded shadow-md w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center">Sign Up</h2>
-        {error && <p className="text-red-500 mb-4">{error}</p>}
+        {error && (
+          <p className="text-red-500 mb-4 text-sm break-words">{String(error)}</p>
+        )}
         <input
-          type="email"
+          type="text"
           placeholder="Email"
           className="w-full p-2 border rounded mb-4"
           value={email}
@@ -54,17 +65,11 @@ export default function Signup() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700"
-        >
+        <button type="submit" className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
           Sign Up
         </button>
         <p className="mt-4 text-center text-sm">
-          Already have an account?{" "}
-          <Link to="/login" className="text-blue-600 hover:underline">
-            Login
-          </Link>
+          Already have an account? <Link to="/login" className="text-blue-600 hover:underline">Login</Link>
         </p>
       </form>
     </div>
