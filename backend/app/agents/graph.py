@@ -1,4 +1,5 @@
 # backend/app/agents/graph.py
+import re
 import json
 from typing import TypedDict, List, Optional, Dict
 
@@ -43,9 +44,11 @@ Return ONLY valid JSON. No explanation, no markdown fences.
 
 Possible intents:
 - "knowledge_base": questions about hostel rules, timings, fees, leave, warden, mess policy.
-- "menu_search": student wants to find a food/dish but didn't name a shop.
-- "place_order": student wants to order a specific item, optionally with shop and quantity.
+- "menu_search": student mentions a dish but NO shop. (e.g. "I want a sandwich", "show me sandwiches")
+- "place_order": student names BOTH a dish AND a shop. (e.g. "order 2 sandwiches from Sharma Cafe")
 - "general": greetings, thanks, small talk, off-topic.
+
+IMPORTANT: If a dish is mentioned but no shop name, ALWAYS classify as menu_search, never place_order.
 
 Also extract entities (null if not present):
 - dish: lowercase food name (e.g. "sandwich", "coffee")
@@ -144,7 +147,14 @@ def menu_search_agent(state: AgentState) -> AgentState:
         for item, shop in rows
     ]
     return {"menu_results": results}
-
+def _clean_name(name: str) -> str:
+    """Strip quotes, trailing punctuation, and extra whitespace from LLM-extracted names."""
+    if not name:
+        return ""
+    name = name.strip().strip("'\"`.")
+    name = re.sub(r"[^\w\s]", "", name)   # keep only alphanumeric + spaces
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
 
 # ---------- 2c. Place order ----------
 def order_agent(state: AgentState) -> AgentState:
@@ -169,7 +179,8 @@ def order_agent(state: AgentState) -> AgentState:
     if not dish or not shop_name:
         return {"order_summary": "missing_info"}
 
-    shop = db.query(Shop).filter(Shop.name.ilike(shop_name)).first()
+    shop_name = _clean_name(shop_name)
+    shop = db.query(Shop).filter(Shop.name.ilike(f"%{shop_name}%")).first()
     if not shop or not shop.is_open:
         return {"order_summary": "shop_unavailable"}
 
